@@ -8,13 +8,13 @@ edition = "2021"
 
 [dependencies]
 
-[dev-dependencies]
-loom = "0.5.4"
+[target.'cfg(loom)'.dependencies]
+loom = { version = "0.5", features = ["checkpoint"] }
 
 
 [package.metadata.nix]
 build = true
 
 [workspace.metadata.nix]
-nativeBuildInputs = [ "cargo-edit", "pkg-config", "cmake" ]
+nativeBuildInputs = [ "cargo-edit", "pkg-config", "cmake", "gdb" ]
 
