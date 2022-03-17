@@ -1,4 +1,4 @@
-use std::{cell::UnsafeCell, ops::{Deref, DerefMut}};
+use std::{cell::UnsafeCell, ops::{Deref, DerefMut}, ptr, sync::atomic::fence};
 
 #[cfg(loom)]
 pub(crate) use loom::sync::atomic::{AtomicU8, Ordering};
@@ -109,11 +109,12 @@ impl<T> DerefMut for CupchanWriter<T> {
 impl<T> Drop for CupchanWriter<T> {
 	fn drop(&mut self) {
 		let state = self.chan.state.fetch_xor(WRITER_LOCK, Ordering::AcqRel);
-		if state & LOCK_MASK == 0 {
+		if state & READER_LOCK == 0 { // If no more reader locks
 			// Safety: self.chan was created using Box::leak() and the lock mask system prevents duplicate frees
+			self.chan.state.load(Ordering::Acquire); // Make sure all threads have already gone
 			unsafe {
 				let ptr = std::mem::transmute::<_, *mut Cupchan<T>>(self.chan);
-				Box::from_raw(ptr);
+				ptr::drop_in_place(ptr);
 			}
 		}
 	}
@@ -162,12 +163,13 @@ impl<T> Deref for CupchanReader<T> {
 }
 impl<T> Drop for CupchanReader<T> {
 	fn drop(&mut self) {
-		let state = self.chan.state.fetch_xor(READER_LOCK, Ordering::AcqRel);
-		if state & LOCK_MASK == 0 {
+		let prev_state = self.chan.state.fetch_xor(READER_LOCK, Ordering::Release);
+		if prev_state & WRITER_LOCK == 0 { // If no more writer lock
+			fence(Ordering::Acquire); // Make sure to sync with all other threads
 			// Safety: self.chan was created using Box::leak() and the lock mask system prevents duplicate frees
 			unsafe {
 				let ptr = std::mem::transmute::<_, *mut Cupchan<T>>(self.chan);
-				Box::from_raw(ptr);
+				ptr::drop_in_place(ptr);
 			}
 		}
 	}
