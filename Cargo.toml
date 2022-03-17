@@ -1,5 +1,6 @@
 [package]
 name = "cupchan"
+description = "Simple async overwriting channel between two threads that is wait & block free by swapping cups around"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,5 +8,13 @@ edition = "2021"
 
 [dependencies]
 
+[dev-dependencies]
+loom = "0.5.4"
+
+
 [package.metadata.nix]
 build = true
+
+[workspace.metadata.nix]
+nativeBuildInputs = [ "cargo-edit", "pkg-config", "cmake" ]
+
