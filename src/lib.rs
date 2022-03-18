@@ -1,10 +1,10 @@
-use std::{cell::UnsafeCell, ops::{Deref, DerefMut}, ptr, sync::atomic::fence};
+use std::{ops::{Deref, DerefMut}, ptr};
 
 #[cfg(loom)]
-pub(crate) use loom::sync::atomic::{AtomicU8, Ordering};
+pub(crate) use loom::{cell::{UnsafeCell, ConstPtr, MutPtr}, sync::atomic::{AtomicU8, Ordering}};
 
 #[cfg(not(loom))]
-pub(crate) use std::sync::atomic::{AtomicU8, Ordering};
+pub(crate) use std::{cell::UnsafeCell, sync::atomic::{AtomicU8, Ordering}};
 
 const OBJECT_PERMUTATIONS: &'static [u8; 6] = &[
 	0b000, // <W><S><R>
@@ -48,7 +48,7 @@ const UPDATE_FLAG: u8 = 0b00100000; // OR with state to set
 #[derive(Debug)]
 pub struct Cupchan<T> {
 	// One of these cups is reading, one writing, one for intermediate storage, which one is which depends on the permutation state
-	cups: UnsafeCell<[T; 3]>,
+	cups: [UnsafeCell<T>; 3],
 	// least significant bits = represents the permutation of cups (of which there are 6) i.e. which one is the reader, writer, and storage
 	// most significant bits = (writer lock, reader lock, whether storage was just updated)
 	state: AtomicU8,
@@ -56,7 +56,7 @@ pub struct Cupchan<T> {
 impl<T: Clone> Cupchan<T> {
 	pub fn new(initial: T) -> (CupchanWriter<T>, CupchanReader<T>) {
 		let chan = Cupchan {
-			cups: UnsafeCell::new([initial.clone(), initial.clone(), initial]),
+			cups: [UnsafeCell::new(initial.clone()), UnsafeCell::new(initial.clone()), UnsafeCell::new(initial)],
 			state: AtomicU8::new(OBJECT_PERMUTATIONS[0] ^ WRITER_LOCK ^ READER_LOCK), // Initial state: read & write are locked, <W><S><R> permutation
 		};
 		let chan = Box::leak(Box::new(chan)); // Use special dropping logic based on state
@@ -74,12 +74,24 @@ impl<T> CupchanWriter<T> {
 		// Update storage flag & swap cups
 		let _ = self.chan.state.fetch_update(Ordering::Release, Ordering::Relaxed, |state| {
 			let res = (state & !PERMUTATION_MASK) ^ WRITER_SWAP_PERMUTATIONS[(state & PERMUTATION_MASK) as usize] ^ UPDATE_FLAG;
+			println!("[write] new permutation, reader: {}, writer: {}", READER_PERMUTATIONS[(res & PERMUTATION_MASK) as usize], WRITER_PERMUTATIONS[(res & PERMUTATION_MASK) as usize]);
 			Some(res)
 		});
 	}
+	#[inline]
+	fn write_index(&self) -> usize {
+		let state = self.chan.state.load(Ordering::Acquire); // Make sure this is after all state changes
+		WRITER_PERMUTATIONS[(state & PERMUTATION_MASK) as usize]
+	}
+	#[cfg(loom)]
+	pub fn loom_ptr(&self) -> MutPtr<T> {
+		let write_index = self.write_index();
+		println!("[write] index: {:?}", write_index);
+		self.chan.cups[write_index].get_mut()
+	}
 	pub fn print(&self)
 	where T: std::fmt::Debug {
-		println!("write state: {:?}, {:0>8b}", &self.chan.cups, self.chan.state.load(Ordering::SeqCst));
+		println!("[write] state: {:?}, {:0>8b}", &self.chan.cups, self.chan.state.load(Ordering::SeqCst));
 	}
 	pub fn new_reader(&self) -> Option<CupchanReader<T>> {
 		// Toggle READER_LOCK bit if not set
@@ -91,19 +103,17 @@ impl<T> CupchanWriter<T> {
 		res.ok().map(|_| CupchanReader { chan: self.chan })
 	}
 }
+#[cfg(not(loom))]
 impl<T> Deref for CupchanWriter<T> {
 	type Target = T;
 	fn deref(&self) -> &Self::Target {
-		let state = self.chan.state.load(Ordering::Acquire); // Make sure this is after all state changes
-		let obj_idx = WRITER_PERMUTATIONS[(state & PERMUTATION_MASK) as usize];
-		unsafe { & (*self.chan.cups.get())[obj_idx] }
+		unsafe { & (*self.chan.cups[self.write_index()].get()) }
 	}
 }
+#[cfg(not(loom))]
 impl<T> DerefMut for CupchanWriter<T> {
 	fn deref_mut(&mut self) -> &mut Self::Target {
-		let state = self.chan.state.load(Ordering::Acquire);
-		let obj_idx = WRITER_PERMUTATIONS[(state & PERMUTATION_MASK) as usize];
-		unsafe { &mut (*self.chan.cups.get())[obj_idx] }
+		unsafe { &mut (*self.chan.cups[self.write_index()].get()) }
 	}
 }
 impl<T> Drop for CupchanWriter<T> {
@@ -137,35 +147,43 @@ impl<T> CupchanReader<T> {
 		});
 		res.ok().map(|_| CupchanWriter { chan: self.chan })
 	}
-	fn read(&self) -> Result<u8, u8> {
-		self.chan.state.fetch_update(Ordering::Acquire, Ordering::Relaxed, |state| {
+	#[inline]
+	fn read_index(&self) -> usize {
+		let _ = self.chan.state.fetch_update(Ordering::Acquire, Ordering::Relaxed, |state| {
 			if state & UPDATE_FLAG != 0 {
-				let ret = (state & !PERMUTATION_MASK) ^ READER_SWAP_PERMUTATIONS[(state & PERMUTATION_MASK) as usize] ^ UPDATE_FLAG;
-				Some(ret)
+				let res = (state & !PERMUTATION_MASK) ^ READER_SWAP_PERMUTATIONS[(state & PERMUTATION_MASK) as usize] ^ UPDATE_FLAG;
+				println!("[read]  new permutation, reader: {}, writer: {}", READER_PERMUTATIONS[(res & PERMUTATION_MASK) as usize], WRITER_PERMUTATIONS[(res & PERMUTATION_MASK) as usize]);
+				Some(res)
 			} else {
 				None
 			}
-		})
+		});
+		let state = self.chan.state.load(Ordering::Acquire);
+		READER_PERMUTATIONS[(state & PERMUTATION_MASK) as usize]
+	}
+	#[cfg(loom)]
+	pub fn loom_ptr(&self) -> ConstPtr<T> {
+		let read_index = self.read_index();
+		println!("[read]  index: {:?}", read_index);
+		unsafe { self.chan.cups[read_index].get() }
 	}
 	pub fn print(&self)
 	where T: std::fmt::Debug {
 		println!("read state: {:?}, {:0>8b}", &self.chan.cups, self.chan.state.load(Ordering::SeqCst));
 	}
 }
+#[cfg(not(loom))]
 impl<T> Deref for CupchanReader<T> {
 	type Target = T;
 	fn deref(&self) -> &Self::Target {
-		let _ = self.read();
-		let state = self.chan.state.load(Ordering::Acquire);
-		let obj_idx = READER_PERMUTATIONS[(state & PERMUTATION_MASK) as usize];
-		unsafe { &(*self.chan.cups.get())[obj_idx] }
+		unsafe { & (*self.chan.cups[self.read_index()].get()) }
 	}
 }
 impl<T> Drop for CupchanReader<T> {
 	fn drop(&mut self) {
 		let prev_state = self.chan.state.fetch_xor(READER_LOCK, Ordering::Release);
 		if prev_state & WRITER_LOCK == 0 { // If no more writer lock
-			fence(Ordering::Acquire); // Make sure to sync with all other threads
+			self.chan.state.load(Ordering::Acquire); // Make sure all threads have already gone
 			// Safety: self.chan was created using Box::leak() and the lock mask system prevents duplicate frees
 			unsafe {
 				let ptr = std::mem::transmute::<_, *mut Cupchan<T>>(self.chan);
