@@ -1,4 +1,6 @@
 # cupchan
+*Yes cup-chan, please swap my cups around uwu*
+
 Simple async overwriting channel between two threads that is wait &amp; block free by swapping cups around
 
 This project came from the need for me to have a thread lazily update some data on another thread without having to wait for mutexes.
@@ -24,3 +26,9 @@ Here is a diagram of all the possible cup states and the relations between them:
 This crate has been validated with [loom](https://github.com/tokio-rs/loom), however as I am new to this package, the test may not cover all potential cases. Use at your own risk. 
 
 Also make sure *not* to use the loom flags as those make the test fail for some reason.
+
+Run tests:
+```shell
+$ cargo test
+$ RUSTFLAGS="--cfg loom" cargo test --test loom_test --release
+```

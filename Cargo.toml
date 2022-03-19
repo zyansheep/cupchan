@@ -1,8 +1,12 @@
 [package]
 name = "cupchan"
 description = "Simple async overwriting channel between two threads that is wait & block free by swapping cups around"
+license = "LGPL-2.1 AND MIT AND BSD-2-Clause"
+repository = "https://github.com/zyansheep/cupchan"
 version = "0.1.0"
 edition = "2021"
+
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
