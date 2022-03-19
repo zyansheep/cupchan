@@ -1,6 +1,6 @@
-#![cfg(loom)]
-use std::mem::ManuallyDrop;
+//! note to self: do not use the various LOOM_ flags, they will make loom crash on this test for some reason
 
+#![cfg(loom)]
 use cupchan::{Cupchan, CupchanWriter};
 use loom::{thread};
 
@@ -8,21 +8,15 @@ use loom::{thread};
 fn loom_test() {
 	loom::model(|| {
 		let (mut writer, reader) = Cupchan::new(0);
-		let mut writer = ManuallyDrop::new(writer);
-		let reader = ManuallyDrop::new(reader);
-
-		thread::spawn(move || {
-			let ptr = writer.loom_ptr();
-			unsafe { *ptr.deref() = i; }
-			drop(ptr);
-			writer.flush();
-			thread::yield_now();
-		});
 		
-		const MAX: usize = 3;
+		const MAX: usize = 5;
 		let join = thread::spawn(move || {
 			for i in 0..MAX {
-				
+				let ptr = writer.loom_ptr();
+				unsafe { *ptr.deref() = i; }
+				drop(ptr);
+				writer.flush();
+				thread::yield_now();
 			}
 		});
 

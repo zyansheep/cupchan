@@ -74,7 +74,7 @@ impl<T> CupchanWriter<T> {
 		// Update storage flag & swap cups
 		let _ = self.chan.state.fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
 			let res = (state & !PERMUTATION_MASK) ^ WRITER_SWAP_PERMUTATIONS[(state & PERMUTATION_MASK) as usize] | UPDATE_FLAG;
-			//println!("[write] new permutation, reader: {}, writer: {}", READER_PERMUTATIONS[(res & PERMUTATION_MASK) as usize], WRITER_PERMUTATIONS[(res & PERMUTATION_MASK) as usize]);
+			println!("[write] new permutation, reader: {}, writer: {}, update?: {}", READER_PERMUTATIONS[(res & PERMUTATION_MASK) as usize], WRITER_PERMUTATIONS[(res & PERMUTATION_MASK) as usize], res & UPDATE_FLAG);
 			Some(res)
 		});
 	}
@@ -86,12 +86,12 @@ impl<T> CupchanWriter<T> {
 	#[cfg(loom)]
 	pub fn loom_ptr(&mut self) -> MutPtr<T> {
 		let write_index = self.write_index();
-		//println!("[write] index: {:?}", write_index);
+		println!("[write] index: {:?}", write_index);
 		self.chan.cups[write_index].get_mut()
 	}
 	pub fn print(&self)
 	where T: std::fmt::Debug {
-		//println!("[write] state: {:?}, {:0>8b}", &self.chan.cups, self.chan.state.load(Ordering::SeqCst));
+		println!("[write] state: {:?}, {:0>8b}", &self.chan.cups, self.chan.state.load(Ordering::SeqCst));
 	}
 	pub fn new_reader(&self) -> Option<CupchanReader<T>> {
 		// Toggle READER_LOCK bit if not set
@@ -150,9 +150,10 @@ impl<T> CupchanReader<T> {
 	#[inline]
 	fn read_index(&self) -> usize {
 		let res = self.chan.state.fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+			println!("[read] current permutation, reader: {}, writer: {}, update?: {}", READER_PERMUTATIONS[(state & PERMUTATION_MASK) as usize], WRITER_PERMUTATIONS[(state & PERMUTATION_MASK) as usize], state & UPDATE_FLAG);
 			if state & UPDATE_FLAG != 0 {
 				let res = (state & !PERMUTATION_MASK) ^ READER_SWAP_PERMUTATIONS[(state & PERMUTATION_MASK) as usize] ^ UPDATE_FLAG;
-				//println!("[read]  new permutation, reader: {}, writer: {}", READER_PERMUTATIONS[(res & PERMUTATION_MASK) as usize], WRITER_PERMUTATIONS[(res & PERMUTATION_MASK) as usize]);
+				println!("[read]  new permutation, reader: {}, writer: {}", READER_PERMUTATIONS[(res & PERMUTATION_MASK) as usize], WRITER_PERMUTATIONS[(res & PERMUTATION_MASK) as usize]);
 				Some(res)
 			} else {
 				None
@@ -166,12 +167,12 @@ impl<T> CupchanReader<T> {
 	#[cfg(loom)]
 	pub fn loom_ptr(&self) -> ConstPtr<T> {
 		let read_index = self.read_index();
-		//println!("[read]  index: {:?}", read_index);
+		println!("[read]  index: {:?}", read_index);
 		unsafe { self.chan.cups[read_index].get() }
 	}
 	pub fn print(&self)
 	where T: std::fmt::Debug {
-		//println!("read state: {:?}, {:0>8b}", &self.chan.cups, self.chan.state.load(Ordering::SeqCst));
+		println!("read state: {:?}, {:0>8b}", &self.chan.cups, self.chan.state.load(Ordering::SeqCst));
 	}
 }
 #[cfg(not(loom))]
@@ -227,7 +228,7 @@ use crate::Cupchan;
 	fn test_chan_async() {
 		let (mut writer, reader) = Cupchan::new(0);
 		
-		const MAX: usize = 20000000;
+		const MAX: usize = 2000000;
 		let join = thread::spawn(move || {
 			for i in 0..MAX {
 				*writer = i;
