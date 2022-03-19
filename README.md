@@ -1,4 +1,13 @@
 # cupchan
+<p>
+    <a href="https://docs.rs/cupchan">
+        <img src="https://img.shields.io/docsrs/cupchan.svg" alt="docs.rs">
+    </a>
+    <a href="https://crates.io/crates/cupchan">
+        <img src="https://img.shields.io/crates/v/cupchan.svg" alt="crates.io">
+    </a>
+</p>
+
 *Yes cup-chan, please swap my cups around uwu*
 
 Simple async overwriting channel between two threads that is wait &amp; block free by swapping cups around
