@@ -116,7 +116,7 @@ const READER_CUP_MAP: &[usize; 16] = &[
 /// Useful in a situation where you need to model some read-only state on a receiving thread that can be periodically, but quickly, updated from a writer thread.
 struct Cupchan<T> {
 	// One of these cups is reading, one writing, one for intermediate storage, which one is which depends on the permutation state
-	cups: [Box<UnsafeCell<T>>; 3], // Use boxes to avoid False Sharing between cpu cache lines https://en.wikipedia.org/wiki/False_sharing
+	cups: [UnsafeCell<T>; 3], // Use boxes to avoid False Sharing between cpu cache lines https://en.wikipedia.org/wiki/False_sharing
 	/// Represents the permutation of cups i.e. which one is the reader, writer, and storage as well as whether or not storage is ready to be read from.
 	state: AtomicUsize,
 	/// True if reader or writer is dropped
@@ -126,15 +126,15 @@ struct Cupchan<T> {
 pub fn cupchan<T: Clone>(initial: T) -> (CupchanWriter<T>, CupchanReader<T>) {
 	let chan = Cupchan {
 		cups: [
-			Box::new(UnsafeCell::new(initial.clone())),
-			Box::new(UnsafeCell::new(initial.clone())),
-			Box::new(UnsafeCell::new(initial)),
+			UnsafeCell::new(initial.clone()),
+			UnsafeCell::new(initial.clone()),
+			UnsafeCell::new(initial),
 		],
 		state: AtomicUsize::new(OBJECT_PERMUTATIONS[0]), // Initial state: <W><S><R> permutation with UPDATE_FLAG unset
 		unconnected: AtomicBool::new(false),
 	};
 	let chan = Box::leak(Box::new(chan)); // Use special dropping logic based on self.unconnected
-	(CupchanWriter { chan, current_cup: chan.cups[0].as_ref() }, CupchanReader { chan })
+	(CupchanWriter { chan, current_cup: &chan.cups[0] }, CupchanReader { chan })
 }
 impl<T: fmt::Debug> fmt::Debug for Cupchan<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -155,7 +155,7 @@ pub struct CupchanWriter<T: 'static> {
 impl<T> CupchanWriter<T> {
 	fn new(chan: &'static Cupchan<T>) -> Self {
 		let cup_index = WRITER_CUP_MAP[chan.state.load(Ordering::Acquire)];
-		Self { chan, current_cup: chan.cups[cup_index].as_ref() }
+		Self { chan, current_cup: &chan.cups[cup_index] }
 	}
 	pub fn flush(&mut self) {
 		// Needs exclusive reference
@@ -166,12 +166,12 @@ impl<T> CupchanWriter<T> {
 			.fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
 				Some(state ^ WRITER_STATE_MAP[state])
 			}).unwrap();
-		self.current_cup = self.chan.cups[WRITER_CUP_MAP[res ^ WRITER_STATE_MAP[res]]].as_ref();
+		self.current_cup = &self.chan.cups[WRITER_CUP_MAP[res ^ WRITER_STATE_MAP[res]]];
 	}
 	pub fn new_reader(&self) -> Option<CupchanReader<T>> {
 		// Set unconnected false, If was actually unconnected, return new reader
 		if self.chan.unconnected.swap(false, Ordering::SeqCst) {
-			Some(CupchanReader { chan: self.chan })
+			Some(CupchanReader::new(self.chan))
 		} else {
 			None
 		}
@@ -219,15 +219,20 @@ pub struct CupchanReader<T: 'static> {
 	chan: &'static Cupchan<T>,
 }
 impl<T> CupchanReader<T> {
+	fn new(chan: &'static Cupchan<T>) -> Self {
+		Self {
+			chan,
+		}
+	}
 	#[inline]
-	fn read_index(&self) -> usize {
+	fn read(&self) -> &'static UnsafeCell<T> {
 		let res = self
 			.chan
 			.state
 			.fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
 				Some(state ^ READER_STATE_MAP[state])
 			}).unwrap();
-		READER_CUP_MAP[res ^ READER_STATE_MAP[res]]
+		&self.chan.cups[READER_CUP_MAP[res ^ READER_STATE_MAP[res]]]
 	}
 	pub fn new_writer(&self) -> Option<CupchanWriter<T>> {
 		// Set unconnected false, If was actually unconnected, return new reader
@@ -246,7 +251,7 @@ impl<T> CupchanReader<T> {
 impl<T> Deref for CupchanReader<T> {
 	type Target = T;
 	fn deref(&self) -> &Self::Target {
-		unsafe { &(*self.chan.cups[self.read_index()].get()) }
+		unsafe { &(*self.read().get()) }
 	}
 }
 impl<T> Drop for CupchanReader<T> {
@@ -318,7 +323,7 @@ mod tests {
 
 	#[test]
 	fn crossbeam_chan_async() {
-		let (tx, rx) = crossbeam_channel::bounded(10);
+		let (tx, rx) = crossbeam_channel::bounded(3);
 
 		let join = thread::spawn(move || {
 			for i in 0..MAX {

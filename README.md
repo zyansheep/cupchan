@@ -30,14 +30,14 @@ The system of markers ensures that the writing and reading thread never access t
 
 Here is a diagram of all the possible cup states and the relations between them: [quiver](https://q.uiver.app/?q=WzAsMTMsWzYsNCwiXFx0ZXh0cm17V1NSfSJdLFs2LDAsIlxcdGV4dHJte1dTUlxcY2hlY2ttYXJrfSJdLFs4LDQsIlxcdGV4dHJte1dSU30iXSxbNiw4LCJcXHRleHRybXtTUldcXGNoZWNrbWFya30iXSxbMiw4LCJcXHRleHRybXtSU1d9Il0sWzIsNCwiXFx0ZXh0cm17UlNXXFxjaGVja21hcmt9Il0sWzMsNiwiXFx0ZXh0cm17U1JXfSJdLFswLDQsIlxcdGV4dHJte1JXU1xcY2hlY2ttYXJrfSJdLFsyLDAsIlxcdGV4dHJte1NXUn0iXSxbNSw2LCJcXHRleHRybXtXUlNcXGNoZWNrbWFya30iXSxbNSwyLCJcXHRleHRybXtTV1JcXGNoZWNrbWFya30iXSxbMywyLCJcXHRleHRybXtSV1N9Il0sWzAsMTBdLFsyLDMsIlciLDFdLFszLDQsIlIiLDFdLFs1LDYsIlIiLDFdLFs0LDcsIlciLDFdLFs3LDgsIlIiLDFdLFs4LDEsIlciLDFdLFsxLDIsIlIiLDFdLFs5LDAsIlIiLDFdLFs5LDMsIlciLDEseyJzdHlsZSI6eyJ0YWlsIjp7Im5hbWUiOiJhcnJvd2hlYWQifX19XSxbMCwxMCwiVyIsMV0sWzEwLDExLCJSIiwxXSxbMSwxMCwiVyIsMSx7InN0eWxlIjp7InRhaWwiOnsibmFtZSI6ImFycm93aGVhZCJ9fX1dLFsxMSw1LCJXIiwxXSxbNiw5LCJXIiwxXSxbNSw3LCJXIiwxLHsic3R5bGUiOnsidGFpbCI6eyJuYW1lIjoiYXJyb3doZWFkIn19fV1d)
 
-# Validation Warning
-
-This crate has been validated with [loom](https://github.com/tokio-rs/loom), however as I am new to this package, the test may not cover all potential cases. Use at your own risk. 
-
-Also make sure *not* to use the loom flags as those make the test fail for some reason.
+# Tests
+This crate has been validated with [loom](https://github.com/tokio-rs/loom)
 
 Run tests:
 ```shell
 $ cargo test
 $ RUSTFLAGS="--cfg loom" cargo test --test loom_test --release
 ```
+Note to self: If using LOOM flags, make sure to clear checkpoint file after changing code.
+
+# Benchmarks

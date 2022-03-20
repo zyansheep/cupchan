@@ -21,7 +21,7 @@ build = true
 toolchain = "nightly"
 
 [workspace.metadata.nix]
-nativeBuildInputs = [ "cargo-edit", "pkg-config", "cmake", "gdb", "perf-tools" ]
+nativeBuildInputs = [ "cargo-edit", "pkg-config", "cmake", "gdb", "perf-tools", "linuxKernel.packages.linux_lqx.perf" ]
 
 
 
