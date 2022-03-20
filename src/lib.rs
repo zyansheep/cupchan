@@ -213,7 +213,9 @@ impl<T> Drop for CupchanWriter<T> {
 		}
 	}
 }
-unsafe impl<T> Send for CupchanWriter<T> where T: Send + Sync {}
+// Allow sending between threads
+unsafe impl<T: Sync + Send> Send for CupchanWriter<T> {}
+unsafe impl<T: Sync + Send> Sync for CupchanWriter<T> {}
 
 // when created, modify state to set reader lock flag
 // when dropped, modify state permutation to swap reader & storage object, unset reader lock flag, unset storage new flag
@@ -271,6 +273,9 @@ impl<T> Drop for CupchanReader<T> {
 		}
 	}
 }
+// Allow sending between threads
+unsafe impl<T: Sync + Send> Send for CupchanReader<T> {}
+unsafe impl<T: Sync + Send> Sync for CupchanReader<T> {}
 
 #[cfg(test)]
 mod tests {
