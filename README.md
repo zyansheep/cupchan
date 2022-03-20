@@ -28,7 +28,7 @@ The reader thread wants to check the data, so it checks the update flag. If set,
 
 The system of markers ensures that the writing and reading thread never access the same cup at the same time.
 
-Here is a diagram of all the possible cup states and the relations between them: [quiver](https://q.uiver.app/?q=WzAsMTMsWzYsNCwiXFx0ZXh0cm17V1NSfSJdLFs2LDAsIlxcdGV4dHJte1dTUlxcY2hlY2ttYXJrfSJdLFs4LDQsIlxcdGV4dHJte1dSU30iXSxbNiw4LCJcXHRleHRybXtTUldcXGNoZWNrbWFya30iXSxbMiw4LCJcXHRleHRybXtSU1d9Il0sWzIsNCwiXFx0ZXh0cm17UlNXXFxjaGVja21hcmt9Il0sWzMsNiwiXFx0ZXh0cm17U1JXfSJdLFswLDQsIlxcdGV4dHJte1JXU1xcY2hlY2ttYXJrfSJdLFsyLDAsIlxcdGV4dHJte1NXUn0iXSxbNSw2LCJcXHRleHRybXtXUlNcXGNoZWNrbWFya30iXSxbNSwyLCJcXHRleHRybXtTV1JcXGNoZWNrbWFya30iXSxbMywyLCJcXHRleHRybXtSV1N9Il0sWzAsMTBdLFsyLDMsIlciLDFdLFszLDQsIlIiLDFdLFs1LDYsIlIiLDFdLFs0LDcsIlciLDFdLFs3LDgsIlIiLDFdLFs4LDEsIlciLDFdLFsxLDIsIlIiLDFdLFs5LDAsIlIiLDFdLFs5LDMsIlciLDEseyJzdHlsZSI6eyJ0YWlsIjp7Im5hbWUiOiJhcnJvd2hlYWQifX19XSxbMCwxMCwiVyIsMV0sWzEwLDExLCJSIiwxXSxbMSwxMCwiVyIsMSx7InN0eWxlIjp7InRhaWwiOnsibmFtZSI6ImFycm93aGVhZCJ9fX1dLFsxMSw1LCJXIiwxXSxbNiw5LCJXIiwxXSxbNSw3LCJXIiwxLHsic3R5bGUiOnsidGFpbCI6eyJuYW1lIjoiYXJyb3doZWFkIn19fV1d)
+Here is a diagram of all the possible cup states and the relations between them: [quiver](https://q.uiver.app/?q=WzAsMTMsWzYsNCwiXFx0ZXh0cm17V1NSfSJdLFs2LDAsIlxcdGV4dHJte1dTUlxcY2hlY2ttYXJrfSJdLFs4LDQsIlxcdGV4dHJte1dSU30iXSxbNiw4LCJcXHRleHRybXtTUldcXGNoZWNrbWFya30iXSxbMiw4LCJcXHRleHRybXtSU1d9Il0sWzIsNCwiXFx0ZXh0cm17UlNXXFxjaGVja21hcmt9Il0sWzMsNiwiXFx0ZXh0cm17U1JXfSJdLFswLDQsIlxcdGV4dHJte1JXU1xcY2hlY2ttYXJrfSJdLFsyLDAsIlxcdGV4dHJte1NXUn0iXSxbNSw2LCJcXHRleHRybXtXUlNcXGNoZWNrbWFya30iXSxbNSwyLCJcXHRleHRybXtTV1JcXGNoZWNrbWFya30iXSxbMywyLCJcXHRleHRybXtSV1N9Il0sWzAsMTBdLFsyLDMsIlciLDFdLFszLDQsIlIiLDFdLFs1LDYsIlIiLDFdLFs0LDcsIlciLDFdLFs3LDgsIlIiLDFdLFs4LDEsIlciLDFdLFsxLDIsIlIiLDFdLFs5LDAsIlIiLDFdLFs5LDMsIlciLDEseyJzdHlsZSI6eyJ0YWlsIjp7Im5hbWUiOiJhcnJvd2hlYWQifX19XSxbMCwxMCwiVyIsMV0sWzEwLDExLCJSIiwxXSxbMSwxMCwiVyIsMSx7InN0eWxlIjp7InRhaWwiOnsibmFtZSI6ImFycm93aGVhZCJ9fX1dLFsxMSw1LCJXIiwxXSxbNiw5LCJXIiwxXSxbNSw3LCJXIiwxLHsic3R5bGUiOnsidGFpbCI6eyJuYW1lIjoiYXJyb3doZWFkIn19fV1d).
 
 # Tests
 This crate has been validated with [loom](https://github.com/tokio-rs/loom)
@@ -41,3 +41,18 @@ $ RUSTFLAGS="--cfg loom" cargo test --test loom_test --release
 Note to self: If using LOOM flags, make sure to clear checkpoint file after changing code.
 
 # Benchmarks
+
+Each benchmark represents 5_000 64-bit integers being sent.
+
+```
+test tests::bench_crossbeam_chan_cap_10 ... bench:     227,330 ns/iter (+/- 53,862)
+test tests::bench_crossbeam_chan_cap_3  ... bench:     406,431 ns/iter (+/- 73,856)
+test tests::bench_cupchan_greedy        ... bench:     404,699 ns/iter (+/- 36,296)
+test tests::bench_cupchan_lazy          ... bench:     102,177 ns/iter (+/- 10,770)
+test tests::bench_flume_chan            ... bench:     725,894 ns/iter (+/- 107,237)
+```
+This crate is faster than crossbeam & flume for what it is supposed to do (stream updated values lazily). If you just need to move and consume data as fast as possible, use those crates instead.
+
+(The difference between lazy & greedy is that lazy yields the thread after every read).
+
+It still is not as fast as it could be, mostly because of the use of `fetch_update` instead of cpu intrinsics, if anyone has an idea for how to make this better, ping me on the rust discord (i go by `@Zyansheep#8020`).

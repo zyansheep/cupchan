@@ -25,18 +25,19 @@
 //! ```
 #![feature(test)]
 
-use std::{fmt, ops::{Deref, DerefMut}, ptr};
+use std::{fmt, ptr};
 
 #[cfg(loom)]
 pub(crate) use loom::{
 	cell::{ConstPtr, MutPtr, UnsafeCell},
-	sync::atomic::{AtomicUsize, AtomicBool, Ordering},
+	sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 #[cfg(not(loom))]
 pub(crate) use std::{
 	cell::UnsafeCell,
-	sync::atomic::{AtomicUsize, AtomicBool, Ordering},
+	ops::{Deref, DerefMut},
+	sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 const OBJECT_PERMUTATIONS: &[usize; 6] = &[
@@ -75,10 +76,7 @@ const WRITER_STATE_MAP: &[usize; 16] = &[
 	0b11111111, // (Invalid State)
 	0b11111111, // (Invalid State)
 ];
-const WRITER_CUP_MAP: &[usize; 16] = &[
-	0, 0, 2, 1, 2, 1, 3, 3,
-	0, 0, 2, 1, 2, 1, 3, 3,
-];
+const WRITER_CUP_MAP: &[usize; 16] = &[0, 0, 2, 1, 2, 1, 3, 3, 0, 0, 2, 1, 2, 1, 3, 3];
 
 /* const READER_SWAP_PERMUTATIONS: &[u8; 6] = &[
 	0b001, // <W><R><S>
@@ -107,10 +105,7 @@ const READER_STATE_MAP: &[usize; 16] = &[
 	0b11111111, // (Invalid State)
 	0b11111111, // (Invalid State)
 ];
-const READER_CUP_MAP: &[usize; 16] = &[
-	2, 1, 1, 2, 0, 0, 3, 3,
-	2, 1, 1, 2, 0, 0, 3, 3,
-];
+const READER_CUP_MAP: &[usize; 16] = &[2, 1, 1, 2, 0, 0, 3, 3, 2, 1, 1, 2, 0, 0, 3, 3];
 
 /// A simple async channel used to quickly update data between threads
 /// Useful in a situation where you need to model some read-only state on a receiving thread that can be periodically, but quickly, updated from a writer thread.
@@ -134,7 +129,13 @@ pub fn cupchan<T: Clone>(initial: T) -> (CupchanWriter<T>, CupchanReader<T>) {
 		unconnected: AtomicBool::new(false),
 	};
 	let chan = Box::leak(Box::new(chan)); // Use special dropping logic based on self.unconnected
-	(CupchanWriter { chan, current_cup: &chan.cups[0] }, CupchanReader { chan })
+	(
+		CupchanWriter {
+			chan,
+			current_cup: &chan.cups[0],
+		},
+		CupchanReader { chan },
+	)
 }
 impl<T: fmt::Debug> fmt::Debug for Cupchan<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -155,7 +156,10 @@ pub struct CupchanWriter<T: 'static> {
 impl<T> CupchanWriter<T> {
 	fn new(chan: &'static Cupchan<T>) -> Self {
 		let cup_index = WRITER_CUP_MAP[chan.state.load(Ordering::Acquire)];
-		Self { chan, current_cup: &chan.cups[cup_index] }
+		Self {
+			chan,
+			current_cup: &chan.cups[cup_index],
+		}
 	}
 	pub fn flush(&mut self) {
 		// Needs exclusive reference
@@ -165,7 +169,8 @@ impl<T> CupchanWriter<T> {
 			.state
 			.fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
 				Some(state ^ WRITER_STATE_MAP[state])
-			}).unwrap();
+			})
+			.unwrap();
 		self.current_cup = &self.chan.cups[WRITER_CUP_MAP[res ^ WRITER_STATE_MAP[res]]];
 	}
 	pub fn new_reader(&self) -> Option<CupchanReader<T>> {
@@ -178,8 +183,8 @@ impl<T> CupchanWriter<T> {
 	}
 
 	#[cfg(loom)]
-	pub fn loom_ptr(&mut self) -> MutPtr<Box<T>> {
-		(*self.current_cup).get_mut()
+	pub fn loom_ptr(&mut self) -> MutPtr<T> {
+		self.current_cup.get_mut()
 	}
 }
 #[cfg(not(loom))]
@@ -220,9 +225,7 @@ pub struct CupchanReader<T: 'static> {
 }
 impl<T> CupchanReader<T> {
 	fn new(chan: &'static Cupchan<T>) -> Self {
-		Self {
-			chan,
-		}
+		Self { chan }
 	}
 	#[inline]
 	fn read(&self) -> &'static UnsafeCell<T> {
@@ -231,7 +234,8 @@ impl<T> CupchanReader<T> {
 			.state
 			.fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
 				Some(state ^ READER_STATE_MAP[state])
-			}).unwrap();
+			})
+			.unwrap();
 		&self.chan.cups[READER_CUP_MAP[res ^ READER_STATE_MAP[res]]]
 	}
 	pub fn new_writer(&self) -> Option<CupchanWriter<T>> {
@@ -243,8 +247,8 @@ impl<T> CupchanReader<T> {
 		}
 	}
 	#[cfg(loom)]
-	pub fn loom_ptr(&self) -> ConstPtr<Box<T>> {
-		unsafe { self.chan.cups[self.read_index()].get() }
+	pub fn loom_ptr(&self) -> ConstPtr<T> {
+		self.read().get()
 	}
 }
 #[cfg(not(loom))]
@@ -300,7 +304,7 @@ mod tests {
 
 	const MAX: usize = 5_000;
 	#[test]
-	fn cupchan_async() {
+	fn cupchan_async_greedy_reader() {
 		let (mut writer, reader) = cupchan(0usize);
 
 		let join = thread::spawn(move || {
@@ -313,6 +317,28 @@ mod tests {
 		let mut current = *reader;
 		// let mut array = [0usize; MAX];
 		while current < MAX - 1 {
+			current = *reader;
+		}
+		// print!("{:?}", array);
+		assert!(*reader == MAX - 1);
+
+		join.join().unwrap();
+	}
+	#[test]
+	fn cupchan_async_lazy_reader() {
+		let (mut writer, reader) = cupchan(0usize);
+
+		let join = thread::spawn(move || {
+			for i in 0..MAX {
+				*writer = i;
+				writer.flush();
+			}
+		});
+
+		let mut current = *reader;
+		// let mut array = [0usize; MAX];
+		while current < MAX - 1 {
+			thread::yield_now();
 			current = *reader;
 		}
 		// print!("{:?}", array);
@@ -340,17 +366,75 @@ mod tests {
 		join.join().unwrap();
 	}
 
+	#[test]
+	fn crossbeam_chan_async_cap_10() {
+		let (tx, rx) = crossbeam_channel::bounded(10);
+
+		let join = thread::spawn(move || {
+			for i in 0..MAX {
+				tx.send(i).unwrap();
+			}
+		});
+
+		let mut current = 0;
+		for _ in 0..MAX {
+			current = rx.recv().unwrap();
+		}
+		assert!(current == MAX - 1);
+
+		join.join().unwrap();
+	}
+
+	#[test]
+	fn flume_chan_async() {
+		let (tx, rx) = flume::unbounded();
+
+		let join = thread::spawn(move || {
+			for i in 0..MAX {
+				tx.send(i).unwrap();
+			}
+		});
+
+		let mut current = 0;
+		for _ in 0..MAX {
+			current = rx.recv().unwrap();
+		}
+		assert!(current == MAX - 1);
+
+		join.join().unwrap();
+	}
+
 	#[bench]
-	fn bench_cupchan(b: &mut Bencher) {
+	fn bench_cupchan_greedy(b: &mut Bencher) {
 		b.iter(|| {
-			cupchan_async();
+			cupchan_async_greedy_reader();
+		})
+	}
+	#[bench]
+	fn bench_cupchan_lazy(b: &mut Bencher) {
+		b.iter(|| {
+			cupchan_async_lazy_reader();
 		})
 	}
 
 	#[bench]
-	fn bench_crossbeam_chan(b: &mut Bencher) {
+	fn bench_crossbeam_chan_cap_3(b: &mut Bencher) {
 		b.iter(|| {
 			crossbeam_chan_async();
+		})
+	}
+
+	#[bench]
+	fn bench_crossbeam_chan_cap_10(b: &mut Bencher) {
+		b.iter(|| {
+			crossbeam_chan_async_cap_10();
+		})
+	}
+
+	#[bench]
+	fn bench_flume_chan(b: &mut Bencher) {
+		b.iter(|| {
+			flume_chan_async();
 		})
 	}
 }
