@@ -6,19 +6,22 @@ repository = "https://github.com/zyansheep/cupchan"
 version = "0.1.0"
 edition = "2021"
 
-
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 
 [target.'cfg(loom)'.dependencies]
-loom = { version = "0.5", features = ["checkpoint"] }
+loom = { version = "0.5.4", features = ["checkpoint"] }
 
+[dev-dependencies]
+crossbeam-channel = "0.5.4"
 
 [package.metadata.nix]
 build = true
+toolchain = "nightly"
 
 [workspace.metadata.nix]
-nativeBuildInputs = [ "cargo-edit", "pkg-config", "cmake", "gdb" ]
+nativeBuildInputs = [ "cargo-edit", "pkg-config", "cmake", "gdb", "perf-tools" ]
+
+
 
